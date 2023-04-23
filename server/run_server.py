@@ -1,10 +1,11 @@
 """файл для запуска серверного приложения в цикле"""
-from argparse import ArgumentParser
-from asyncio import get_event_loop, set_event_loop
+import argparse
+import asyncio
+import sys
 
-from quamash import QEventLoop
-from PyQt5.QtWidgets import QApplication
-from sys import argv
+from PyQt5 import Qt
+#from PyQt5.QtCore import QEventLoop
+from quamash import QEventLoop  # asyncio works fine with pyqt5 loop
 
 from server.server_config import DB_PATH, PORT
 from server.utils.server_proto import ChatServerProtocol
@@ -22,13 +23,12 @@ class ConsoleServerApp:
     def main(self):
         connections = dict()
         users = dict()
-        loop = get_event_loop()
+        loop = asyncio.get_event_loop()
 
         # Each client will create a new protocol instance
         self.ins = ChatServerProtocol(self.db_path, connections, users)
 
-        coro = loop.create_server(lambda: self.ins, self.args["addr"],
-                                  self.args["port"])
+        coro = loop.create_server(lambda: self.ins, self.args["addr"], self.args["port"])
         server = loop.run_until_complete(coro)
 
         # Serve requests until Ctrl+C
@@ -59,11 +59,11 @@ class GuiServerApp:
         self.ins = ChatServerProtocol(self.db_path, connections, users)
 
         # GUI
-        app = QApplication(argv)
+        app = Qt.QApplication(sys.argv)
         loop = QEventLoop(app)
-        set_event_loop(loop)  # NEW must set the event loop
-        # server_instance=self.ins, parsed_args=self.args
-        wnd = ServerMonitorWindow()
+        asyncio.set_event_loop(loop)  # NEW must set the event loop
+
+        wnd = ServerMonitorWindow(server_instance=self.ins, parsed_args=self.args)
         wnd.show()
 
         with loop:
@@ -84,7 +84,7 @@ class GuiServerApp:
 
 def parse_and_run():
     def parse_args():
-        parser = ArgumentParser(description="Server settings")
+        parser = argparse.ArgumentParser(description="Server settings")
         parser.add_argument("--addr", default="127.0.0.1", type=str)
         parser.add_argument("--port", default=PORT, type=int)
         parser.add_argument('--nogui', action='store_true')

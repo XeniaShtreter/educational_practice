@@ -1,10 +1,9 @@
 """файл для запуска клиентского приложения в цикле"""
 from argparse import ArgumentParser
 from asyncio import ensure_future, get_event_loop, run, create_task, set_event_loop
+from sys import argv
 
-import sys
-
-from PyQt5 import Qt, QtWidgets
+from PyQt5.QtWidgets import QApplication, QDialog
 from quamash import QEventLoop
 
 from client.utils.client_proto import ChatClientProtocol, ClientAuth
@@ -23,9 +22,7 @@ class ConsoleClientApp:
     def main(self):
         # create event loop
         loop = get_event_loop()
-        print(f"ох 1 - {loop}")
-        #for signame in ('SIGINT', 'SIGTERM'):
-            #loop.add_signal_handler(getattr(signal, signame), loop.stop)
+
 
         # authentication process
         auth = ClientAuth(db_path=self.db_path)
@@ -40,30 +37,25 @@ class ConsoleClientApp:
             else:
                 print('wrong username/password')
 
-        # Each client will create a new protocol instance
         tasks = []
         client_ = ChatClientProtocol(db_path=self.db_path,
                                      loop=loop,
                                      username=usr,
                                      password=passwrd)
-        # connect to our server
+
         try:
-            coro = loop.create_connection(lambda: client_, self.args["addr"], self.args["port"])
-            print(f"ох 2 - {coro}")
+            coro = loop.create_connection(lambda: client_, self.args["addr"],
+                                          self.args["port"])
             transport, protocol = loop.run_until_complete(coro)
-            print(f"ох 3 - {transport, protocol}")
         except ConnectionRefusedError:
             print('Error. wrong server')
             exit(1)
 
-        # Serve requests until Ctrl+C
         try:
-            task = loop.create_task(client_.get_from_console())  # create Task from coroutine
-            print(f"ох 4 - {task}")
+            task = loop.create_task(client_.get_from_console())
             tasks.append(task)
             loop.run_until_complete(task)
-            #await task
-            #run(task)
+
 
         except KeyboardInterrupt:
             pass
@@ -76,23 +68,57 @@ class ConsoleClientApp:
 
 class GuiClientApp:
     """GUI Client"""
+
     def __init__(self, parsed_args, db_path):
         self.args = parsed_args
         self.db_path = db_path
         self.ins = None
 
     def main(self):
-
         # create event loop
-        app = Qt.QApplication(sys.argv)
+        app = QApplication(argv)
         loop = QEventLoop(app)
         set_event_loop(loop)  # NEW must set the event loop
 
         # authentication process
-        login_wnd = LoginWindow()
+        auth_ = ClientAuth(db_path=self.db_path)
+        login_wnd = LoginWindow(auth_instance=auth_)
 
-        if login_wnd.exec_() == QtWidgets.QDialog.Accepted:
-            pass
+        if login_wnd.exec_() == QDialog.Accepted:
+            # Each client will create a new protocol instance
+            client_ = ChatClientProtocol(db_path=self.db_path,
+                                         loop=loop,
+                                         username=login_wnd.username,
+                                         password=login_wnd.password)
+
+            # create Contacts window
+            wnd = ContactsWindow(client_instance=client_, user_name=login_wnd.username)
+            client_.gui_instance = wnd  # reference from protocol to GUI, for msg update
+
+            with loop:
+                # cleaning old instances
+                del auth_
+                del login_wnd
+
+                # connect to our server
+                try:
+                    coro = loop.create_connection(lambda: client_, self.args["addr"], self.args["port"])
+                    server = loop.run_until_complete(coro)
+                except ConnectionRefusedError:
+                    print('Error. wrong server')
+                    exit(1)
+
+                # start GUI client
+                wnd.show()
+                client_.get_from_gui()  # asyncio.ensure_future(client_.get_from_gui(loop))
+
+                # Serve requests until Ctrl+C
+                try:
+                    loop.run_forever()
+                except KeyboardInterrupt:
+                    pass
+                except Exception:
+                    pass
 
 
 def parse_and_run():
@@ -115,6 +141,7 @@ def parse_and_run():
         # start GUI client
         a = GuiClientApp(args, DB_PATH)
         a.main()
+
 
 
 if __name__ == '__main__':

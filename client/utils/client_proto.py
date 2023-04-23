@@ -1,14 +1,13 @@
 from asyncio import Protocol, CancelledError
+from sys import stdout
 from hashlib import pbkdf2_hmac
 from binascii import hexlify
-from sys import stdout
 
-from client.utils.client_messages import JimClientMessage
 from client.utils.mixins import ConvertMixin, DbInterfaceMixin
+from client.utils.client_messages import JimClientMessage
 
 
 class ClientAuth(ConvertMixin, DbInterfaceMixin):
-    """Authentication server"""
 
     def __init__(self, db_path, username=None, password=None):
         super().__init__(db_path)
@@ -45,12 +44,14 @@ class ClientAuth(ConvertMixin, DbInterfaceMixin):
 
 
 class ChatClientProtocol(Protocol, ConvertMixin, DbInterfaceMixin):
-    def __init__(self, db_path, loop, username=None, password=None,
+    def __init__(self, db_path, loop, tasks=None, username=None, password=None,
                  gui_instance=None, **kwargs):
         super().__init__(db_path)
         self.user = username
         self.password = password
         self.jim = JimClientMessage()
+        self.gui_instance = gui_instance
+        self.tasks = tasks
 
         self.conn_is_open = False
         self.loop = loop
@@ -61,11 +62,23 @@ class ChatClientProtocol(Protocol, ConvertMixin, DbInterfaceMixin):
     def connection_made(self, transport):
         """ Called when connection is initiated """
         self.sockname = transport.get_extra_info("sockname")
-        print(f"1 - {self.sockname}")
         self.transport = transport
-        print(f"2 - {self.transport}")
         self.send_auth(self.user, self.password)
         self.conn_is_open = True
+
+    def connection_lost(self, exc):
+
+        try:
+            self.conn_is_open = False
+            for task in self.tasks:
+                task.cancel()
+
+        except:
+            pass
+
+        finally:
+            self.loop.stop()
+            self.loop.close()
 
     def send_auth(self, user, password):
         """send authenticate message to the server"""
@@ -80,6 +93,8 @@ class ChatClientProtocol(Protocol, ConvertMixin, DbInterfaceMixin):
         :return:
         """
         msg = self._bytes_to_dict(data)
+
+        print(msg)
         if msg:
             try:
 
@@ -87,7 +102,7 @@ class ChatClientProtocol(Protocol, ConvertMixin, DbInterfaceMixin):
 
                     self.transport.write(self._dict_to_bytes(
                         self.jim.presence(self.user,
-                                          status="Connected from {0}:{1}".format(
+                                          status="Connected from {0}: {1}".format(
                                               *self.sockname))))
 
                 elif msg['action'] == 'response':
@@ -99,49 +114,50 @@ class ChatClientProtocol(Protocol, ConvertMixin, DbInterfaceMixin):
                     else:
                         self.output(msg)
 
+                elif msg['action'] == 'msg':
+                    self.output(msg)
+
             except Exception as e:
                 print(e)
 
     async def get_from_console(self):
-        """
-        Recieve messages from Console
-        :param loop:
-        :return:
-        """
+
         while not self.conn_is_open:
             pass
 
         self.output = self.output_to_console
-        self.output(
-            "{2} connected to {0}:{1}\n".format(*self.sockname, self.user))
+        self.output("{2} connected to {0}:{1}\n".format(*self.sockname, self.user))
 
         while True:
-            content = await self.loop.run_in_executor(None,
-                                                      input)
-            # print(content)
-            print(f"3 - {content}")
-            # Get stdin/stdout forever
-            # request = ''
-            # args_ = content.split(' ')
-
-            # if request:
-            # self.send(request)
+            content = await self.loop.run_in_executor(None, input)
 
     def output_to_console(self, data):
-        """
-            print output data to terminal
-        :param data: msg dictionary
-        :return:
-        """
+
         _data = data
-        print(f"4 - {_data}")
-        #try:
-            #if _data['from'] == self.user:
-                #_data['message'] = 'Me to {}: '.format(_data['to']) + _data[
-                    #'message']
-            #else:
-                #_data['message'] = '{}: '.format(_data['from']) + _data[
-                    #'message']
-            #stdout.write(str(_data['message']) + '\n')
-        #except:
+
         stdout.write(_data)
+
+    def send(self, request):
+        if request:
+            msg = self._dict_to_bytes(request)
+            self.transport.write(msg)
+
+    def send_msg(self, to_user, content):
+        if to_user and content:
+            request = self.jim.message(self.user, to_user, content)
+            self.transport.write(self._dict_to_bytes(request))
+
+    def get_from_gui(self):
+        self.output = self.output_to_gui
+
+    def output_to_gui(self, msg, response=False):
+        try:
+            if self.gui_instance:
+                if response:
+                    self.gui_instance.is_auth = True
+
+                if self.user == msg['to']:
+                    self.gui_instance.chat_ins()
+
+        except Exception as e:
+            print(e)

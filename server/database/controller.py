@@ -1,8 +1,8 @@
+from datetime import datetime as dt
 from sqlalchemy.exc import IntegrityError
-from datetime import datetime
 
 from server.database.db_connector import DataAccessLayer
-from server.database.models import Client, History, Contacts, Messages
+from server.database.models import Client, History, Messages, Contacts
 
 
 class ClientMessages:
@@ -15,61 +15,17 @@ class ClientMessages:
     def add_client(self, username, password, info=None):
         """Добавление клиента"""
         if self.get_client_by_username(username):
-            return 'Пользователь {} уже существует'.format(username)
+            return 'Username {} already exists'.format(username)
         else:
-            new_user = Client(username=username, password=password,
-                              info=info)
+            new_user = Client(username=username, password=password, info=info)
             self.dal.session.add(new_user)
             self.dal.session.commit()
-            print('Добавлен пользователь: {}'.format(new_user))
+            print('Client added: {}'.format(new_user))
 
     def get_client_by_username(self, username):
         """Получение клиента по имени"""
-        client = self.dal.session.query(Client).filter(
-            Client.username == username).first()
+        client = self.dal.session.query(Client).filter(Client.username == username).first()
         return client
-
-    def add_client_history(self, client_username, ip_addr='8.8.8.8'):
-        """добавление истории клиента"""
-        client = self.get_client_by_username(client_username)
-        if client:
-            new_history = History(ip_addr=ip_addr, client_id=client.id)
-            try:
-                self.dal.session.add(new_history)
-                self.dal.session.commit()
-                print('Добавлена запись в историю: {}'.format(new_history))
-            except IntegrityError as err:
-                print('Ошибка интеграции с базой данных: {}'.format(err))
-                self.dal.session.rollback()
-
-        return 'Пользователь {} не существует'.format(client_username)
-
-    def get_client_history(self, client_username):
-        """получение истории входов клиента на сервер"""
-        client = self.get_client_by_username(client_username)
-        if client:
-            return self.dal.session.query(History) \
-                .filter(History.client_id == client.id).all()
-        return 'Client {} does not exists'.format(client_username)
-
-    def set_user_online(self, client_username):
-        client = self.get_client_by_username(client_username)
-        if client:
-            client.online_status = True
-            self.dal.session.commit()
-        return 'Пользователь {} не существует'.format(client_username)
-
-    def set_user_offline(self, client_username):
-        """
-         Set status to offline
-        :param client_username:
-        :return:
-        """
-        client = self.get_client_by_username(client_username)
-        if client:
-            client.online_status = False
-            self.dal.session.commit()
-        return 'Client {} does not exists'.format(client_username)
 
     def add_contact(self, client_username, contact_username):
         """Добавление контакта"""
@@ -77,8 +33,7 @@ class ClientMessages:
         if contact:
             client = self.get_client_by_username(client_username)
             if client:
-                new_contact = Contacts(client_id=client.id,
-                                       contact_id=contact.id)
+                new_contact = Contacts(client_id=client.id, contact_id=contact.id)
                 try:
                     self.dal.session.add(new_contact)
                     self.dal.session.commit()
@@ -113,26 +68,44 @@ class ClientMessages:
         """Получение контактов клиента"""
         client = self.get_client_by_username(client_username)
         if client:
-            return self.dal.session.query(Contacts) \
-                .join(Client, Contacts.client_id == Client.id) \
-                .filter(Client.username == client_username).all()
+            return self.dal.session.query(Contacts)\
+                    .join(Client, Contacts.client_id == Client.id)\
+                    .filter(Client.username == client_username).all()
         return 'Client {} does not exists'.format(client_username)
 
     def get_all_clients(self):
         """Получение списка всех зарегистрированных пользователей"""
         return self.dal.session.query(Client).all()
 
-    def get_user_status(self, client_username):
+    def add_client_history(self, client_username, ip_addr='8.8.8.8'):
+        """добавление истории клиента"""
         client = self.get_client_by_username(client_username)
-        return client.online_status
+        if client:
+            new_history = History(ip_addr=ip_addr, client_id=client.id)
+            try:
+                self.dal.session.add(new_history)
+                self.dal.session.commit()
+                print('History added: {}'.format(new_history))
+            except IntegrityError as err:
+                print('IntegrityError error: {}'.format(err))
+                self.dal.session.rollback()
+
+        return 'Client {} does not exists'.format(client_username)
+
+    def get_client_history(self, client_username):
+        """получение истории входов клиента на сервер"""
+        client = self.get_client_by_username(client_username)
+        if client:
+            return self.dal.session.query(History)\
+                .filter(History.client_id == client.id).all()
+        return 'Client {} does not exists'.format(client_username)
 
     def add_client_message(self, client_username, contact_username, text_msg):
         """бекап сообщения клиента"""
         client = self.get_client_by_username(client_username)
         contact = self.get_client_by_username(contact_username)
         if client and contact:
-            new_msg = Messages(client_id=client.id, contact_id=contact.id,
-                               message=text_msg, time=datetime.now())
+            new_msg = Messages(client_id=client.id, contact_id=contact.id, message=text_msg, time=dt.now())
             try:
                 self.dal.session.add(new_msg)
                 self.dal.session.commit()
@@ -146,6 +119,34 @@ class ClientMessages:
         """Получение всех сообщений от клиента"""
         client = self.get_client_by_username(client_username)
         if client:
-            return self.dal.session.query(Messages) \
+            return self.dal.session.query(Messages)\
                 .filter(Messages.client_id == client.id).all()
         return 'Client {} does not exists'.format(client_username)
+
+    def set_user_online(self, client_username):
+        """
+         Set status to online
+        :param client_username:
+        :return:
+        """
+        client = self.get_client_by_username(client_username)
+        if client:
+            client.online_status = True
+            self.dal.session.commit()
+        return 'Client {} does not exists'.format(client_username)
+
+    def set_user_offline(self, client_username):
+        """
+         Set status to offline
+        :param client_username:
+        :return:
+        """
+        client = self.get_client_by_username(client_username)
+        if client:
+            client.online_status = False
+            self.dal.session.commit()
+        return 'Client {} does not exists'.format(client_username)
+
+    def get_user_status(self, client_username):
+        client = self.get_client_by_username(client_username)
+        return client.online_status
